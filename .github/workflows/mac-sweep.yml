@@ -1,9 +1,11 @@
 name: mac-sweep
 
 # Run the unit tests on Apple Silicon (macOS) to look for platform-specific failures.
-# Manual trigger only; no token permissions.
+# Runs only on pushes to the mac-sweep branch of this fork; no token permissions.
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - mac-sweep
 
 permissions: {}
 
