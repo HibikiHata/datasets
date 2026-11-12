@@ -1,0 +1,84 @@
+name: mac-sweep
+
+# Run the unit tests on Apple Silicon (macOS) to look for platform-specific failures.
+# Manual trigger only; no token permissions.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  per-file:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[tests]" pytest-timeout
+          pip freeze > freeze.txt
+      - name: Run each test file separately
+        run: |
+          mkdir -p sweep
+          python - <<'EOF'
+          import json, pathlib, re, subprocess, sys, time
+          out = pathlib.Path("sweep")
+          rows = []
+          for f in sorted(str(p) for p in pathlib.Path("tests").rglob("test_*.py")):
+              log = out / (f.replace("/", "__") + ".txt")
+              t = time.time()
+              cmd = ["/usr/bin/time", "-l", sys.executable, "-m", "pytest", "-p", "no:cacheprovider",
+                     "-m", "not integration", "--timeout=300", "-rsxXfE", f]
+              try:
+                  r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
+                  text, code = r.stdout + r.stderr, r.returncode
+              except subprocess.TimeoutExpired as e:
+                  text, code = str(e.stdout or "") + str(e.stderr or ""), "HANG"
+              log.write_text(text)
+              m = re.search(r"(\d+)\s+maximum resident set size", text)
+              last = [l for l in text.splitlines() if re.search(r"(passed|failed|error|skipped|no tests ran)", l)]
+              rows.append({"file": f, "code": code, "seconds": round(time.time() - t, 1),
+                           "max_rss_mb": round(int(m.group(1)) / 2**20, 1) if m else None,
+                           "summary": last[-1] if last else ""})
+              print(rows[-1], flush=True)
+          (out / "summary.json").write_text(json.dumps(rows, indent=1))
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: per-file
+          path: |
+            sweep/
+            freeze.txt
+
+  whole:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[tests]" pytest-timeout
+      - name: Run the whole suite with 2 workers
+        run: |
+          mkdir -p whole
+          ( while true; do echo "$(date +%s) $(memory_pressure | tail -1)" >> whole/memory.txt; sleep 15; done ) &
+          python -m pytest -p no:cacheprovider -m "not integration" --timeout=300 -rsxXfE \
+            -n 2 --dist loadfile --junitxml=whole/junit.xml tests/ > whole/pytest.txt 2>&1 || echo "exit=$?" >> whole/pytest.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: whole
+          path: whole/
