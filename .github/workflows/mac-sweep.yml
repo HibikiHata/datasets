@@ -22,6 +22,8 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: |
+          # torchcodec (audio/video features) needs the FFmpeg libraries, as in the upstream CI
+          brew install ffmpeg
           python -m pip install --upgrade pip
           pip install -e ".[tests]" pytest-timeout
           pip freeze > freeze.txt
@@ -71,6 +73,8 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: |
+          # torchcodec (audio/video features) needs the FFmpeg libraries, as in the upstream CI
+          brew install ffmpeg
           python -m pip install --upgrade pip
           pip install -e ".[tests]" pytest-timeout
       - name: Run the whole suite with 2 workers
